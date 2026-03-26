@@ -22,12 +22,13 @@ db.pragma('foreign_keys = ON');
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
-    username     TEXT PRIMARY KEY COLLATE NOCASE,
-    password_hash TEXT NOT NULL,
-    is_admin     INTEGER NOT NULL DEFAULT 0,
-    is_active    INTEGER NOT NULL DEFAULT 1,
-    active_until INTEGER DEFAULT NULL,
-    created_at   INTEGER NOT NULL DEFAULT (unixepoch())
+    username             TEXT PRIMARY KEY COLLATE NOCASE,
+    password_hash        TEXT NOT NULL,
+    is_admin             INTEGER NOT NULL DEFAULT 0,
+    is_active            INTEGER NOT NULL DEFAULT 1,
+    active_until         INTEGER DEFAULT NULL,
+    must_change_password INTEGER NOT NULL DEFAULT 0,
+    created_at           INTEGER NOT NULL DEFAULT (unixepoch())
   );
 
   CREATE TABLE IF NOT EXISTS budget_data (
@@ -45,6 +46,7 @@ db.exec(`
 // Migrate existing deployments that don't have the new columns yet
 try { db.exec(`ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1`); } catch {}
 try { db.exec(`ALTER TABLE users ADD COLUMN active_until INTEGER DEFAULT NULL`); } catch {}
+try { db.exec(`ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0`); } catch {}
 
 // ── Middleware ─────────────────────────────────────────────────────────────
 app.use(cors({ origin: FRONTEND_URL, credentials: true }));
@@ -126,7 +128,12 @@ app.post('/api/login', async (req, res) => {
       { expiresIn: '7d' }
     );
 
-    res.json({ token, username: user.username, isAdmin: user.is_admin === 1 });
+    res.json({
+      token,
+      username: user.username,
+      isAdmin: user.is_admin === 1,
+      mustChangePassword: user.must_change_password === 1,
+    });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'Server error' });
@@ -135,7 +142,38 @@ app.post('/api/login', async (req, res) => {
 
 // Verify current session — used by the frontend on page load
 app.get('/api/me', auth, (req, res) => {
-  res.json({ username: req.user.username, isAdmin: req.user.isAdmin });
+  const user = db.prepare('SELECT must_change_password FROM users WHERE username = ?').get(req.user.username);
+  res.json({
+    username: req.user.username,
+    isAdmin: req.user.isAdmin,
+    mustChangePassword: user ? user.must_change_password === 1 : false,
+  });
+});
+
+// ── Self: Change own password (clears the must_change_password flag) ──────────
+app.put('/api/change-password', auth, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword)
+      return res.status(400).json({ error: 'Both current and new password are required' });
+    if (newPassword.length < 6)
+      return res.status(400).json({ error: 'New password must be at least 6 characters' });
+    if (currentPassword === newPassword)
+      return res.status(400).json({ error: 'New password must be different from current password' });
+
+    const user = db.prepare('SELECT * FROM users WHERE username = ?').get(req.user.username);
+    const valid = await bcrypt.compare(currentPassword, user.password_hash);
+    if (!valid) return res.status(401).json({ error: 'Current password is incorrect' });
+
+    const hash = await bcrypt.hash(newPassword, 12);
+    db.prepare('UPDATE users SET password_hash = ?, must_change_password = 0 WHERE username = ?')
+      .run(hash, req.user.username);
+
+    res.json({ success: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
 // ── User Data ──────────────────────────────────────────────────────────────
@@ -193,7 +231,8 @@ app.post('/api/admin/users', adminOnly, async (req, res) => {
     if (exists) return res.status(409).json({ error: `Username "${username}" already exists` });
 
     const hash = await bcrypt.hash(password, 12);
-    db.prepare('INSERT INTO users (username, password_hash) VALUES (?, ?)')
+    // must_change_password=1 forces user to set their own password on first login
+    db.prepare('INSERT INTO users (username, password_hash, must_change_password) VALUES (?, ?, 1)')
       .run(username.toLowerCase(), hash);
 
     res.json({ success: true, username: username.toLowerCase() });
@@ -217,7 +256,8 @@ app.put('/api/admin/users/:username/password', adminOnly, async (req, res) => {
     if (!password || password.length < 4)
       return res.status(400).json({ error: 'Password must be at least 4 characters' });
     const hash = await bcrypt.hash(password, 12);
-    db.prepare('UPDATE users SET password_hash = ? WHERE username = ?')
+    // Also flag must_change_password so they're prompted to set their own on next login
+    db.prepare('UPDATE users SET password_hash = ?, must_change_password = 1 WHERE username = ?')
       .run(hash, req.params.username.toLowerCase());
     res.json({ success: true });
   } catch (e) {
