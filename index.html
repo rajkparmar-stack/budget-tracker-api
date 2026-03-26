@@ -1,0 +1,850 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Simple Budget Tracker</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <style>* { box-sizing: border-box; } body { margin: 0; }</style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    // ── !! CONFIGURE THIS !! ──────────────────────────────────────────────
+    // After deploying the backend, paste your Railway/Render URL here.
+    // No trailing slash.
+    const API_URL = 'https://budget-tracker-api-production.up.railway.app/';
+    // ─────────────────────────────────────────────────────────────────────
+
+    const ADMIN = 'rajparmar';
+
+    // ── API helpers ───────────────────────────────────────────────────────
+    // JWT stored in localStorage so the user stays logged in between visits
+    let _token = localStorage.getItem('budget-jwt') || null;
+
+    const setToken = t => {
+      _token = t;
+      if (t) localStorage.setItem('budget-jwt', t);
+      else localStorage.removeItem('budget-jwt');
+    };
+
+    const api = async (method, path, body) => {
+      const headers = { 'Content-Type': 'application/json' };
+      if (_token) headers['Authorization'] = `Bearer ${_token}`;
+      const res = await fetch(API_URL + path, {
+        method,
+        headers,
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+      });
+      const data = await res.json().catch(() => ({ error: 'Network error' }));
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      return data;
+    };
+
+    // ── Inline SVG Icons ──────────────────────────────────────────────────
+    const Ico = ({ d, size=20, className='', extra=null }) => (
+      <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24"
+        fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"
+        className={className}>
+        {extra}{(Array.isArray(d)?d:[d]).map((p,i)=><path key={i} d={p}/>)}
+      </svg>
+    );
+    const Icons = {
+      DollarSign:   p=><Ico {...p} d={["M12 1v22","M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"]}/>,
+      TrendingDown: p=><Ico {...p} d={["M23 18 13.5 8.5 8.5 13.5 1 6","M17 18h6v-6"]}/>,
+      TrendingUp:   p=><Ico {...p} d={["M23 6 13.5 15.5 8.5 10.5 1 18","M17 6h6v6"]}/>,
+      PiggyBank:    p=><Ico {...p} d={["M19 5c-1.5 0-2.8 1.4-3 2-3.5-1.5-11-.3-11 5 0 1.8 0 3 2 4.5V20h4v-2h3v2h4v-4c2-.9 3-2.5 3-4.5 0-1-.7-2.75-1-3.5h1v-4h-1z","M2 9v1"]}/>,
+      Calendar:     p=><Ico {...p} d={["M8 2v4","M16 2v4","M3 10h18","M3 6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z"]}/>,
+      Plus:         p=><Ico {...p} d={["M5 12h14","M12 5v14"]}/>,
+      Trash2:       p=><Ico {...p} d={["M3 6h18","M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6","M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2","M10 11v6","M14 11v6"]}/>,
+      Settings:     p=><Ico {...p} extra={<circle cx="12" cy="12" r="3"/>} d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>,
+      LogOut:       p=><Ico {...p} d={["M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4","M16 17l5-5-5-5","M21 12H9"]}/>,
+      Lock:         p=><Ico {...p} extra={<rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>} d="M7 11V7a5 5 0 0 1 10 0v4"/>,
+      CreditCard:   p=><Ico {...p} extra={<rect x="1" y="4" width="22" height="16" rx="2" ry="2"/>} d="M1 10h22"/>,
+      CheckCircle:  p=><Ico {...p} extra={<circle cx="12" cy="12" r="10"/>} d="M9 12l2 2 4-4"/>,
+      AlertCircle:  p=><Ico {...p} extra={<circle cx="12" cy="12" r="10"/>} d={["M12 8v4","M12 16h.01"]}/>,
+      Edit2:        p=><Ico {...p} d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>,
+      ChevronDown:  p=><Ico {...p} d="M6 9l6 6 6-6"/>,
+      ChevronUp:    p=><Ico {...p} d="M18 15l-6-6-6 6"/>,
+      Download:     p=><Ico {...p} d={["M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4","M7 10l5 5 5-5","M12 15V3"]}/>,
+      Users:        p=><Ico {...p} d={["M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2","M23 21v-2a4 4 0 0 0-3-3.87","M16 3.13a4 4 0 0 1 0 7.75"]} extra={<circle cx="9" cy="7" r="4"/>}/>,
+    };
+
+    // ── Root ──────────────────────────────────────────────────────────────
+    function App() {
+      const [status, setStatus] = useState('loading'); // loading | setup | login | app
+      const [user, setUser] = useState('');
+      const [isAdmin, setIsAdmin] = useState(false);
+      const [apiErr, setApiErr] = useState('');
+
+      useEffect(() => { init(); }, []);
+
+      const init = async () => {
+        // Check if backend is reachable and whether admin setup is needed
+        try {
+          const { needed } = await api('GET', '/api/setup-needed');
+          if (needed) { setStatus('setup'); return; }
+        } catch(e) {
+          setApiErr('Cannot reach the server. Check that API_URL is set correctly.');
+          setStatus('error');
+          return;
+        }
+
+        // Try to restore session from stored JWT
+        if (_token) {
+          try {
+            const me = await api('GET', '/api/me');
+            setUser(me.username); setIsAdmin(me.isAdmin); setStatus('app'); return;
+          } catch { setToken(null); }
+        }
+        setStatus('login');
+      };
+
+      const handleLogin = (username, isAdminFlag) => {
+        setUser(username); setIsAdmin(isAdminFlag); setStatus('app');
+      };
+
+      const handleLogout = () => {
+        setToken(null); setUser(''); setIsAdmin(false); setStatus('login');
+      };
+
+      if (status === 'loading') return <Spinner msg="Connecting…" />;
+      if (status === 'error')   return <ErrorScreen msg={apiErr} />;
+      if (status === 'setup')   return <AdminSetup onDone={() => setStatus('login')} />;
+      if (status === 'login')   return <LoginScreen onLogin={handleLogin} />;
+      return <MainApp user={user} isAdmin={isAdmin} onLogout={handleLogout} />;
+    }
+
+    function Spinner({ msg='Loading…' }) {
+      return (
+        <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto mb-4"></div>
+            <p className="text-gray-500 text-sm">{msg}</p>
+          </div>
+        </div>
+      );
+    }
+
+    function ErrorScreen({ msg }) {
+      return (
+        <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
+          <div className="bg-white rounded-2xl shadow-xl p-8 max-w-md w-full text-center">
+            <div className="w-14 h-14 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <Icons.AlertCircle size={28} className="text-red-500" />
+            </div>
+            <h2 className="text-xl font-bold text-gray-800 mb-2">Connection Error</h2>
+            <p className="text-sm text-gray-500 mb-4">{msg}</p>
+            <button onClick={() => window.location.reload()}
+              className="bg-indigo-600 text-white px-6 py-2 rounded-xl text-sm font-medium hover:bg-indigo-700">
+              Retry
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    // ── Admin first-run setup ─────────────────────────────────────────────
+    // This screen only appears once — when the admin account doesn't exist yet.
+    // After the account is created the backend blocks this endpoint permanently.
+    function AdminSetup({ onDone }) {
+      const [pw, setPw] = useState(''); const [pw2, setPw2] = useState('');
+      const [err, setErr] = useState(''); const [busy, setBusy] = useState(false);
+
+      const create = async () => {
+        setErr('');
+        if (pw.length < 6) { setErr('Password must be at least 6 characters'); return; }
+        if (pw !== pw2)    { setErr('Passwords do not match'); return; }
+        setBusy(true);
+        try {
+          await api('POST', '/api/setup', { password: pw });
+          onDone();
+        } catch(e) { setErr(e.message); setBusy(false); }
+      };
+
+      return (
+        <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md">
+            <div className="text-center mb-8">
+              <div className="inline-flex items-center justify-center w-16 h-16 bg-indigo-100 rounded-full mb-4">
+                <Icons.Settings size={28} className="text-indigo-600" />
+              </div>
+              <h1 className="text-2xl font-bold text-gray-800">First-time Setup</h1>
+              <p className="text-gray-400 text-sm mt-2">
+                Set the password for <span className="font-semibold text-indigo-600">{ADMIN}</span>
+              </p>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+                <input type="password" value={pw} onChange={e=>setPw(e.target.value)} onKeyDown={e=>e.key==='Enter'&&create()}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-400"
+                  placeholder="Choose a strong password" disabled={busy} autoFocus />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Confirm password</label>
+                <input type="password" value={pw2} onChange={e=>setPw2(e.target.value)} onKeyDown={e=>e.key==='Enter'&&create()}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-400"
+                  placeholder="Repeat password" disabled={busy} />
+              </div>
+              {err && <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-sm text-red-700">{err}</div>}
+              <button onClick={create} disabled={busy}
+                className="w-full bg-indigo-600 text-white py-3 rounded-xl font-medium hover:bg-indigo-700 text-sm disabled:opacity-50">
+                {busy ? 'Creating account…' : 'Create Admin Account'}
+              </button>
+            </div>
+            <p className="text-xs text-gray-400 text-center mt-6">
+              This screen only appears once — the server blocks it after setup.
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    // ── Login ─────────────────────────────────────────────────────────────
+    function LoginScreen({ onLogin }) {
+      const [un, setUn] = useState(''); const [pw, setPw] = useState('');
+      const [err, setErr] = useState(''); const [busy, setBusy] = useState(false);
+
+      const submit = async () => {
+        setErr('');
+        if (!un || !pw) { setErr('Enter username and password'); return; }
+        setBusy(true);
+        try {
+          const { token, username, isAdmin } = await api('POST', '/api/login', { username: un, password: pw });
+          setToken(token);
+          onLogin(username, isAdmin);
+        } catch(e) { setErr(e.message); setBusy(false); }
+      };
+
+      return (
+        <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md">
+            <div className="text-center mb-8">
+              <div className="inline-flex items-center justify-center w-16 h-16 bg-indigo-100 rounded-full mb-4">
+                <Icons.Lock size={30} className="text-indigo-600" />
+              </div>
+              <h1 className="text-2xl font-bold text-gray-800">Simple Budget Tracker</h1>
+              <p className="text-gray-400 text-sm mt-1">Sign in to your account</p>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
+                <input type="text" value={un} onChange={e=>setUn(e.target.value)} onKeyDown={e=>e.key==='Enter'&&submit()}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-400"
+                  placeholder="Enter username" disabled={busy} autoFocus />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+                <input type="password" value={pw} onChange={e=>setPw(e.target.value)} onKeyDown={e=>e.key==='Enter'&&submit()}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-400"
+                  placeholder="Enter password" disabled={busy} />
+              </div>
+              {err && <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-sm text-red-700">{err}</div>}
+              <button onClick={submit} disabled={busy}
+                className="w-full bg-indigo-600 text-white py-3 rounded-xl font-medium hover:bg-indigo-700 text-sm disabled:opacity-50">
+                {busy ? 'Please wait…' : 'Login'}
+              </button>
+            </div>
+            <p className="text-xs text-gray-400 text-center mt-6">Contact the admin to get an account.</p>
+          </div>
+        </div>
+      );
+    }
+
+    // ── Main App ──────────────────────────────────────────────────────────
+    function MainApp({ user, isAdmin, onLogout }) {
+      const [tab, setTab] = useState('dashboard');
+      const [salary, setSalary] = useState(0);
+      const [fixed, setFixed] = useState([]);
+      const [spend, setSpend] = useState([]);
+      const [saves, setSaves] = useState([]);
+      const [plans, setPlans] = useState([]);
+      const [loans, setLoans] = useState([]);
+      const [balance, setBal] = useState(0);
+      const [loading, setLoading] = useState(true);
+      const [saveErr, setSaveErr] = useState('');
+
+      useEffect(() => { loadAll(); }, [user]);
+
+      const loadAll = async () => {
+        try {
+          // Single request returns all keys at once
+          const data = await api('GET', '/api/data');
+          if (data.salary       != null)  setSalary(data.salary);
+          if (data['fixed-costs'])         setFixed(data['fixed-costs']);
+          if (data.spending)               setSpend(data.spending);
+          if (data.savings)                setSaves(data.savings);
+          if (data['future-plans'])        setPlans(data['future-plans']);
+          if (data.loans)                  setLoans(data.loans);
+          if (data['monthly-balance'] != null) setBal(data['monthly-balance']);
+        } catch(e) { console.error('Load failed:', e.message); }
+        setLoading(false);
+      };
+
+      const save = async (key, value) => {
+        try {
+          await api('PUT', `/api/data/${key}`, { value });
+          setSaveErr('');
+        } catch(e) {
+          setSaveErr('Auto-save failed. Check your connection.');
+          console.error('Save failed:', e.message);
+        }
+        return value;
+      };
+
+      const updSalary  = v => { setSalary(v); save('salary', v); };
+      const updBalance = v => { setBal(v);    save('monthly-balance', v); };
+
+      const addFixed = (n,a) => { const x=[...fixed,{id:Date.now(),name:n,amount:parseFloat(a)}]; setFixed(x); save('fixed-costs',x); };
+      const remFixed = id  => { const x=fixed.filter(c=>c.id!==id); setFixed(x); save('fixed-costs',x); };
+
+      const addSpend = (desc,amt,cat,date) => {
+        const ns=[...spend,{id:Date.now(),description:desc,amount:parseFloat(amt),category:cat,date:date||new Date().toISOString()}];
+        setSpend(ns); save('spending',ns);
+        if (cat==='Loan Payment') {
+          const m=loans.find(l=>l.currentBalance>0&&desc.toLowerCase().includes(l.name.toLowerCase()));
+          if (m) { const nl=loans.map(l=>l.id===m.id?{...l,currentBalance:Math.max(0,l.currentBalance-parseFloat(amt))}:l); setLoans(nl); save('loans',nl); }
+        }
+      };
+      const remSpend = id => { const x=spend.filter(s=>s.id!==id); setSpend(x); save('spending',x); };
+
+      const addSave = (n,t) => { const x=[...saves,{id:Date.now(),name:n,target:parseFloat(t),current:0}]; setSaves(x); save('savings',x); };
+      const updSave = (id,a) => { const x=saves.map(s=>s.id===id?{...s,current:s.current+parseFloat(a)}:s); setSaves(x); save('savings',x); };
+      const remSave = id => { const x=saves.filter(s=>s.id!==id); setSaves(x); save('savings',x); };
+
+      const addPlan = (n,a,m) => { const x=[...plans,{id:Date.now(),name:n,amount:parseFloat(a),monthsAhead:parseInt(m)}]; setPlans(x); save('future-plans',x); };
+      const remPlan = id => { const x=plans.filter(p=>p.id!==id); setPlans(x); save('future-plans',x); };
+
+      const addLoan = (n,pr,r,py) => { const nl=[...loans,{id:Date.now(),name:n,principal:parseFloat(pr),currentBalance:parseFloat(pr),interestRate:parseFloat(r||0),monthlyPayment:parseFloat(py),startDate:new Date().toISOString()}]; setLoans(nl); save('loans',nl); };
+      const remLoan = id => { const x=loans.filter(l=>l.id!==id); setLoans(x); save('loans',x); };
+
+      const totalFixed = fixed.reduce((s,c)=>s+c.amount,0);
+      const totalSaved = saves.reduce((s,g)=>s+g.current,0);
+      const now        = new Date();
+      const thisMonthSpend = spend.filter(s=>{const d=new Date(s.date);return d.getMonth()===now.getMonth()&&d.getFullYear()===now.getFullYear();}).reduce((s,e)=>s+e.amount,0);
+      const freeCash   = balance + salary - totalFixed - thisMonthSpend;
+
+      const TABS = [
+        {id:'dashboard',label:'Dashboard',    I:Icons.DollarSign},
+        {id:'spending', label:'Spending',     I:Icons.TrendingDown},
+        {id:'savings',  label:'Savings',      I:Icons.PiggyBank},
+        {id:'loans',    label:'Loans',        I:Icons.CreditCard},
+        {id:'future',   label:'Future Plans', I:Icons.Calendar},
+        {id:'setup',    label:'Setup',        I:Icons.Settings},
+        ...(isAdmin ? [{id:'users',label:'Users',I:Icons.Users}] : []),
+      ];
+
+      if (loading) return <Spinner msg="Loading your data…" />;
+
+      const ctx = { salary,totalFixed,totalSaved,freeCash,fixed,spend,saves,loans,plans,balance,updBalance,addSpend,addFixed,remFixed,addSave,updSave,remSave,addPlan,remPlan,addLoan,remLoan,updSalary };
+
+      return (
+        <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
+          <div className="max-w-5xl mx-auto p-4 md:p-6">
+            <div className="bg-white rounded-2xl shadow-sm p-5 mb-4 flex items-center justify-between">
+              <div>
+                <h1 className="text-xl font-bold text-gray-800">Simple Budget Tracker</h1>
+                <p className="text-sm text-gray-400 mt-0.5">
+                  Welcome back, <span className="font-semibold text-indigo-600">{user}</span>
+                  {isAdmin && <span className="ml-2 text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-medium">Admin</span>}
+                </p>
+              </div>
+              <button onClick={onLogout} className="flex items-center gap-2 px-4 py-2 bg-red-50 text-red-600 rounded-xl hover:bg-red-100 text-sm font-medium">
+                <Icons.LogOut size={16}/> Logout
+              </button>
+            </div>
+
+            {saveErr && (
+              <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 mb-4 text-sm text-red-700 flex items-center gap-2">
+                <Icons.AlertCircle size={16}/> {saveErr}
+              </div>
+            )}
+
+            <div className="bg-white rounded-2xl shadow-sm mb-4 overflow-hidden">
+              <div className="flex overflow-x-auto">
+                {TABS.map(t=>(
+                  <button key={t.id} onClick={()=>setTab(t.id)}
+                    className={`flex items-center gap-2 px-5 py-3.5 text-sm font-medium transition-colors whitespace-nowrap ${tab===t.id?'bg-indigo-600 text-white':'text-gray-600 hover:bg-gray-50'}`}>
+                    <t.I size={16}/> {t.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl shadow-sm p-5 md:p-6">
+              {tab==='dashboard' && <Dashboard {...ctx}/>}
+              {tab==='spending'  && <SpendingTab  spend={spend}  addSpend={addSpend}  remSpend={remSpend}/>}
+              {tab==='savings'   && <SavingsTab   saves={saves}  addSave={addSave}   updSave={updSave}   remSave={remSave}/>}
+              {tab==='loans'     && <LoansTab     loans={loans}  addLoan={addLoan}   remLoan={remLoan}/>}
+              {tab==='future'    && <FuturePlansTab plans={plans} addPlan={addPlan}   remPlan={remPlan}   salary={salary} totalFixed={totalFixed}/>}
+              {tab==='setup'     && <SetupTab     salary={salary} updSalary={updSalary} fixed={fixed} addFixed={addFixed} remFixed={remFixed} balance={balance} updBalance={updBalance}/>}
+              {tab==='users'     && isAdmin && <UsersTab/>}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ── Metric Card ───────────────────────────────────────────────────────
+    const MC = {green:'bg-green-50 text-green-700 border-green-200',red:'bg-red-50 text-red-700 border-red-200',orange:'bg-orange-50 text-orange-700 border-orange-200',blue:'bg-blue-50 text-blue-700 border-blue-200',purple:'bg-purple-50 text-purple-700 border-purple-200'};
+    const MetricCard = ({title,value,color}) => (
+      <div className={`border-2 rounded-xl p-4 ${MC[color]}`}>
+        <p className="text-xs font-medium opacity-70 mb-1 uppercase tracking-wide">{title}</p>
+        <p className="text-xl font-bold">KES {(value||0).toLocaleString()}</p>
+      </div>
+    );
+
+    // ── Dashboard ─────────────────────────────────────────────────────────
+    function Dashboard({ salary,totalFixed,totalSaved,freeCash,fixed,spend,saves,loans,plans,balance,updBalance,addSpend }) {
+      const [showRecon,setShowRecon]=useState(false);
+      const [bank,setBank]=useState(''); const [cash,setCash]=useState(''); const [mpesa,setMpesa]=useState('');
+      const [rCosts,setRCosts]=useState([]); const [missed,setMissed]=useState([]); const [editC,setEditC]=useState(null);
+      const [done,setDone]=useState(false); const [showSpend,setShowSpend]=useState(false); const [selMo,setSelMo]=useState(0);
+
+      const now=new Date(); const cm=new Date(now.getFullYear(),now.getMonth(),1);
+      const vm=new Date(cm); vm.setMonth(vm.getMonth()-selMo);
+      const moName=vm.toLocaleDateString('en-US',{month:'short',year:'2-digit'});
+
+      const thisSpend=spend.filter(s=>{const d=new Date(s.date);return d.getMonth()===vm.getMonth()&&d.getFullYear()===vm.getFullYear();});
+      const thisTotal=thisSpend.reduce((s,e)=>s+e.amount,0);
+      const adjFixed=rCosts.length>0?rCosts.reduce((s,c)=>s+c.amount,0):totalFixed;
+      const missTotal=missed.reduce((s,e)=>s+e.amount,0);
+      const actual=parseFloat(bank||0)+parseFloat(cash||0)+parseFloat(mpesa||0);
+      const expected=balance+salary-adjFixed-thisTotal-missTotal-totalSaved;
+      const diff=actual-expected; const balanced=Math.abs(diff)<0.01;
+
+      const moOpts=Array.from({length:6},(_,i)=>{const d=new Date(cm);d.setMonth(d.getMonth()-i);return{v:i,l:d.toLocaleDateString('en-US',{month:'long',year:'numeric'})};});
+
+      const doRecon=async()=>{
+        if(actual<=0) return;
+        for(const e of missed) await addSpend(e.description,e.amount,'Other',e.date);
+        updBalance(actual); setDone(true);
+        setTimeout(()=>{setShowRecon(false);setDone(false);setBank('');setCash('');setMpesa('');setRCosts([]);setMissed([]);},2000);
+      };
+
+      return (
+        <div className="space-y-6">
+          <h2 className="text-2xl font-bold text-gray-800">Financial Overview</h2>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+            <MetricCard title="Opening Balance" value={balance}    color="purple"/>
+            <MetricCard title="Monthly Salary"  value={salary}     color="green"/>
+            <MetricCard title="Fixed Costs"     value={totalFixed} color="red"/>
+            <MetricCard title="This Month"      value={thisTotal}  color="orange"/>
+            <MetricCard title="Available"       value={freeCash}   color={freeCash>=0?'blue':'red'}/>
+          </div>
+
+          <div className="bg-gradient-to-br from-indigo-50 to-purple-50 border-2 border-indigo-200 rounded-xl p-5">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-gray-800 flex items-center gap-2"><Icons.TrendingUp size={20} className="text-indigo-600"/> {moName} Summary</h3>
+              <select value={selMo} onChange={e=>setSelMo(parseInt(e.target.value))} className="px-3 py-1.5 border border-indigo-300 rounded-lg text-sm bg-white outline-none">
+                {moOpts.map(o=><option key={o.v} value={o.v}>{o.l}</option>)}
+              </select>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+              <div><p className="text-gray-500 mb-1">Total Income</p>    <p className="text-lg font-bold text-green-700">KES {(balance+salary).toLocaleString()}</p></div>
+              <div><p className="text-gray-500 mb-1">Total Expenses</p>  <p className="text-lg font-bold text-red-700">KES {(totalFixed+thisTotal).toLocaleString()}</p></div>
+              <div><p className="text-gray-500 mb-1">Total Saved</p>     <p className="text-lg font-bold text-blue-700">KES {totalSaved.toLocaleString()}</p></div>
+              <div><p className="text-gray-500 mb-1">Expected Balance</p><p className="text-lg font-bold text-purple-700">KES {freeCash.toLocaleString()}</p></div>
+            </div>
+          </div>
+
+          {selMo===0&&(
+            <div className="bg-gradient-to-br from-green-50 to-emerald-50 border-2 border-green-200 rounded-xl p-5">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-bold text-gray-800 flex items-center gap-2"><Icons.CheckCircle size={20} className="text-green-600"/> Month-End Reconciliation</h3>
+                {!showRecon&&<button onClick={()=>{setRCosts(fixed.map(c=>({...c})));setMissed([]);setShowRecon(true);}} className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700">Start</button>}
+              </div>
+              {!showRecon
+                ?<p className="text-sm text-gray-600">At month-end, reconcile your actual cash with the app's figures.</p>
+                :<ReconForm rCosts={rCosts} editC={editC} setEditC={setEditC}
+                    onUpdCost={(id,v)=>{setRCosts(prev=>prev.map(c=>c.id===id?{...c,amount:parseFloat(v)||c.amount}:c));setEditC(null);}}
+                    adjFixed={adjFixed} missed={missed}
+                    onAddMissed={(d,a,dt)=>setMissed(prev=>[...prev,{id:Date.now(),description:d,amount:parseFloat(a),date:dt}])}
+                    onRemMissed={id=>setMissed(prev=>prev.filter(e=>e.id!==id))}
+                    bank={bank} setBank={setBank} cash={cash} setCash={setCash} mpesa={mpesa} setMpesa={setMpesa}
+                    actual={actual} expected={expected} diff={diff} balanced={balanced}
+                    onRecon={doRecon} done={done}
+                    onCancel={()=>{setShowRecon(false);setBank('');setCash('');setMpesa('');setRCosts([]);setMissed([]);}}
+                  />
+              }
+            </div>
+          )}
+
+          <div className="bg-gray-50 rounded-xl p-4">
+            <button onClick={()=>setShowSpend(!showSpend)} className="w-full flex items-center justify-between">
+              <span className="font-semibold text-gray-800 flex items-center gap-2 text-sm"><Icons.TrendingDown size={18}/> {moName} Spending ({thisSpend.length})</span>
+              {showSpend?<Icons.ChevronUp size={18}/>:<Icons.ChevronDown size={18}/>}
+            </button>
+            {showSpend&&(
+              <div className="mt-3 space-y-2 max-h-72 overflow-y-auto">
+                {thisSpend.length>0?thisSpend.sort((a,b)=>new Date(b.date)-new Date(a.date)).map(s=>(
+                  <div key={s.id} className="bg-white rounded-lg p-3 flex justify-between items-start text-sm">
+                    <div><p className="font-medium text-gray-800">{s.description}</p><p className="text-xs text-gray-400">{new Date(s.date).toLocaleDateString('en-GB')} · {s.category}</p></div>
+                    <p className="font-bold text-gray-800 ml-4">KES {s.amount.toLocaleString()}</p>
+                  </div>
+                )):<p className="text-sm text-gray-400 text-center py-4">No spending this month</p>}
+              </div>
+            )}
+          </div>
+
+          {loans.length>0&&(
+            <div className="bg-gray-50 rounded-xl p-4">
+              <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2 text-sm"><Icons.CreditCard size={18}/> Loan Progress</h3>
+              {loans.map(l=>{const pct=((l.principal-l.currentBalance)/l.principal)*100;return(
+                <div key={l.id} className="bg-white rounded-lg p-3 mb-2">
+                  <div className="flex justify-between text-sm mb-2"><p className="font-medium">{l.name}</p><span className="text-indigo-600 font-medium">{Math.round(pct)}%</span></div>
+                  <div className="w-full bg-gray-200 rounded-full h-2"><div className="bg-indigo-600 h-2 rounded-full" style={{width:`${pct}%`}}></div></div>
+                  <p className="text-xs text-gray-400 mt-1">Balance: KES {l.currentBalance.toLocaleString()} · KES {l.monthlyPayment.toLocaleString()}/mo</p>
+                </div>
+              );})}
+            </div>
+          )}
+
+          {plans.length>0&&(
+            <div className="bg-gray-50 rounded-xl p-4">
+              <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2 text-sm"><Icons.Calendar size={18}/> Upcoming Plans</h3>
+              {plans.sort((a,b)=>a.monthsAhead-b.monthsAhead).slice(0,3).map(p=>{const td=new Date();td.setMonth(td.getMonth()+p.monthsAhead);return(
+                <div key={p.id} className="bg-white rounded-lg p-3 flex justify-between items-center mb-2 text-sm">
+                  <div><p className="font-medium">{p.name}</p><p className="text-xs text-gray-400">{td.toLocaleDateString('en-US',{month:'short',year:'numeric'})} · Save KES {Math.round(p.amount/p.monthsAhead).toLocaleString()}/mo</p></div>
+                  <p className="font-bold text-purple-600">KES {p.amount.toLocaleString()}</p>
+                </div>
+              );})}
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="bg-gray-50 rounded-xl p-4">
+              <h3 className="font-semibold text-gray-700 mb-3 text-sm">Fixed Costs ({fixed.length})</h3>
+              {fixed.length>0?fixed.slice(0,5).map(c=><div key={c.id} className="flex justify-between text-sm py-1"><span className="text-gray-500">{c.name}</span><span className="font-medium">KES {c.amount.toLocaleString()}</span></div>):<p className="text-sm text-gray-400">None added</p>}
+            </div>
+            <div className="bg-gray-50 rounded-xl p-4">
+              <h3 className="font-semibold text-gray-700 mb-3 text-sm">Savings Goals ({saves.length})</h3>
+              {saves.length>0?saves.slice(0,3).map(s=>{const pct=(s.current/s.target)*100;return(<div key={s.id} className="mb-3"><div className="flex justify-between text-xs text-gray-500 mb-1"><span>{s.name}</span><span>{Math.round(pct)}%</span></div><div className="w-full bg-gray-200 rounded-full h-1.5"><div className="bg-green-500 h-1.5 rounded-full" style={{width:`${Math.min(pct,100)}%`}}></div></div></div>);}):<p className="text-sm text-gray-400">No goals set</p>}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ── Reconciliation Form ───────────────────────────────────────────────
+    function ReconForm({rCosts,editC,setEditC,onUpdCost,adjFixed,missed,onAddMissed,onRemMissed,bank,setBank,cash,setCash,mpesa,setMpesa,actual,expected,diff,balanced,onRecon,done,onCancel}) {
+      const [desc,setDesc]=useState(''); const [amt,setAmt]=useState(''); const [dt,setDt]=useState(new Date().toISOString().split('T')[0]);
+      return (
+        <div className="space-y-4 mt-4">
+          <div className="bg-white rounded-xl p-4">
+            <p className="text-sm font-medium text-gray-700 mb-3">Step 1: Review Fixed Expenses</p>
+            <div className="space-y-2 max-h-36 overflow-y-auto">
+              {rCosts.map(c=>(
+                <div key={c.id} className="flex items-center justify-between bg-gray-50 rounded-lg p-2 text-sm">
+                  <span>{c.name}</span>
+                  <div className="flex items-center gap-2">
+                    {editC===c.id?<><input type="number" defaultValue={c.amount} autoFocus onBlur={e=>onUpdCost(c.id,e.target.value)} onKeyDown={e=>e.key==='Enter'&&onUpdCost(c.id,e.target.value)} className="w-24 px-2 py-1 border border-gray-300 rounded text-sm outline-none"/><button onClick={()=>setEditC(null)} className="text-gray-400 text-lg">✓</button></>
+                    :<><span className="font-medium">KES {c.amount.toLocaleString()}</span><button onClick={()=>setEditC(c.id)} className="text-indigo-500 p-1"><Icons.Edit2 size={13}/></button></>}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="mt-3 pt-3 border-t flex justify-between text-sm font-semibold"><span>Total</span><span>KES {adjFixed.toLocaleString()}</span></div>
+          </div>
+          <div className="bg-white rounded-xl p-4">
+            <p className="text-sm font-medium text-gray-700 mb-3">Step 2: Add Missed Expenses</p>
+            <div className="grid grid-cols-3 gap-2 mb-2">
+              <input type="text" value={desc} onChange={e=>setDesc(e.target.value)} placeholder="Description" className="px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none"/>
+              <input type="number" value={amt} onChange={e=>setAmt(e.target.value)} placeholder="Amount" className="px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none"/>
+              <input type="date" value={dt} onChange={e=>setDt(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none"/>
+            </div>
+            <button onClick={()=>{if(desc&&amt){onAddMissed(desc,amt,dt);setDesc('');setAmt('');}}} className="w-full bg-orange-500 text-white py-2 rounded-lg text-sm font-medium hover:bg-orange-600">Add Missed Expense</button>
+            {missed.map(e=><div key={e.id} className="flex justify-between items-center bg-orange-50 rounded-lg p-2 mt-2 text-sm"><span>{e.description} — KES {e.amount.toLocaleString()}</span><button onClick={()=>onRemMissed(e.id)} className="text-red-500"><Icons.Trash2 size={14}/></button></div>)}
+          </div>
+          <div className="bg-white rounded-xl p-4">
+            <p className="text-sm font-medium text-gray-700 mb-3">Step 3: Enter actual balances</p>
+            <div className="grid grid-cols-3 gap-3">
+              {[['Bank',bank,setBank],['Cash',cash,setCash],['M-Pesa',mpesa,setMpesa]].map(([l,v,s])=>(
+                <div key={l}><label className="block text-xs text-gray-500 mb-1">{l}</label><input type="number" value={v} onChange={e=>s(e.target.value)} placeholder="0" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none"/></div>
+              ))}
+            </div>
+          </div>
+          {actual>0&&(
+            <div className="bg-white rounded-xl p-4 space-y-3">
+              <p className="text-sm font-medium text-gray-700">Step 4: Review</p>
+              <div className="grid grid-cols-3 gap-4 text-sm">
+                <div><p className="text-gray-400">Expected</p><p className="font-bold text-lg">KES {expected.toLocaleString()}</p></div>
+                <div><p className="text-gray-400">Actual</p><p className="font-bold text-lg">KES {actual.toLocaleString()}</p></div>
+                <div><p className="text-gray-400">Difference</p><p className={`font-bold text-lg ${diff>=0?'text-green-600':'text-red-500'}`}>KES {Math.abs(diff).toLocaleString()} {diff>=0?'surplus':'short'}</p></div>
+              </div>
+              {balanced?<div className="bg-green-50 border border-green-200 rounded-lg p-3 text-sm text-green-700 font-medium">Perfect match!</div>:<div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-sm text-yellow-800">Discrepancy — check for missed expenses or adjust fixed costs.</div>}
+              <div className="flex gap-3">
+                <button onClick={onRecon} className="flex-1 bg-green-600 text-white py-3 rounded-xl text-sm font-medium hover:bg-green-700">Reconcile & Carry Forward (KES {actual.toLocaleString()})</button>
+                <button onClick={onCancel} className="px-5 bg-gray-100 text-gray-700 py-3 rounded-xl text-sm font-medium hover:bg-gray-200">Cancel</button>
+              </div>
+              {done&&<div className="bg-green-50 border border-green-200 rounded-xl p-3 text-sm text-green-700 text-center font-medium">Reconciled! Opening balance updated.</div>}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ── Spending Tab ──────────────────────────────────────────────────────
+    function SpendingTab({ spend,addSpend,remSpend }) {
+      const [desc,setDesc]=useState(''); const [amt,setAmt]=useState(''); const [cat,setCat]=useState('Other');
+      const [date,setDate]=useState(new Date().toISOString().split('T')[0]);
+      const cats=['Food','Transport','Entertainment','Shopping','Bills','Loan Payment','Other'];
+      const now=new Date();
+      const thisMo=spend.filter(s=>{const d=new Date(s.date);return d.getMonth()===now.getMonth()&&d.getFullYear()===now.getFullYear();});
+      const total=thisMo.reduce((s,e)=>s+e.amount,0);
+      const sub=()=>{if(!desc||!amt)return;addSpend(desc,amt,cat,date);setDesc('');setAmt('');setCat('Other');setDate(new Date().toISOString().split('T')[0]);};
+      return (
+        <div className="space-y-6">
+          <h2 className="text-2xl font-bold text-gray-800">Track Spending</h2>
+          <div className="bg-indigo-50 border-2 border-indigo-200 rounded-xl p-4"><p className="text-sm text-indigo-600 font-medium">This Month</p><p className="text-3xl font-bold text-indigo-900">KES {total.toLocaleString()}</p><p className="text-xs text-indigo-400 mt-1">{thisMo.length} transactions</p></div>
+          <div className="bg-gray-50 rounded-xl p-4 space-y-3">
+            <div><label className="block text-sm font-medium text-gray-700 mb-1">What did you spend on?</label><input type="text" value={desc} onChange={e=>setDesc(e.target.value)} placeholder="e.g., Lunch at Java House" className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-400"/></div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div><label className="block text-sm font-medium text-gray-700 mb-1">Amount (KES)</label><input type="number" value={amt} onChange={e=>setAmt(e.target.value)} placeholder="0" className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-400"/></div>
+              <div><label className="block text-sm font-medium text-gray-700 mb-1">Category</label><select value={cat} onChange={e=>setCat(e.target.value)} className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-400 bg-white">{cats.map(c=><option key={c} value={c}>{c}</option>)}</select></div>
+              <div><label className="block text-sm font-medium text-gray-700 mb-1">Date</label><input type="date" value={date} onChange={e=>setDate(e.target.value)} className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-400"/></div>
+            </div>
+            {cat==='Loan Payment'&&<div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-sm text-blue-700">💡 Include the loan name in the description to auto-reduce its balance.</div>}
+            <button onClick={sub} className="w-full bg-indigo-600 text-white py-3 rounded-xl font-medium hover:bg-indigo-700 flex items-center justify-center gap-2 text-sm"><Icons.Plus size={18}/> Add Spending</button>
+          </div>
+          <div>
+            <h3 className="font-semibold text-gray-700 mb-3 text-sm">All Transactions</h3>
+            {spend.length>0?spend.sort((a,b)=>new Date(b.date)-new Date(a.date)).map(s=>(
+              <div key={s.id} className="bg-gray-50 rounded-xl p-3.5 flex items-center justify-between mb-2">
+                <div><p className="font-medium text-gray-800 text-sm">{new Date(s.date).toLocaleDateString('en-GB')} — {s.description}</p><p className="text-xs text-gray-400">{s.category}</p></div>
+                <div className="flex items-center gap-3"><p className="font-bold text-gray-800 text-sm">KES {s.amount.toLocaleString()}</p><button onClick={()=>remSpend(s.id)} className="text-red-400 hover:text-red-600 p-1.5 hover:bg-red-50 rounded-lg"><Icons.Trash2 size={16}/></button></div>
+              </div>
+            )):<p className="text-gray-400 text-center py-10 text-sm">No spending recorded yet</p>}
+          </div>
+        </div>
+      );
+    }
+
+    // ── Savings Tab ───────────────────────────────────────────────────────
+    function SavingsTab({ saves,addSave,updSave,remSave }) {
+      const [name,setName]=useState(''); const [target,setTarget]=useState(''); const [aa,setAA]=useState({});
+      return (
+        <div className="space-y-6">
+          <h2 className="text-2xl font-bold text-gray-800">Savings Goals</h2>
+          <div className="bg-gray-50 rounded-xl p-4 space-y-3">
+            <div><label className="block text-sm font-medium text-gray-700 mb-1">Goal Name</label><input type="text" value={name} onChange={e=>setName(e.target.value)} placeholder="e.g., Emergency Fund" className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-green-400"/></div>
+            <div><label className="block text-sm font-medium text-gray-700 mb-1">Target (KES)</label><input type="number" value={target} onChange={e=>setTarget(e.target.value)} placeholder="0" className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-green-400"/></div>
+            <button onClick={()=>{if(name&&target){addSave(name,target);setName('');setTarget('');}}} className="w-full bg-green-600 text-white py-3 rounded-xl font-medium hover:bg-green-700 flex items-center justify-center gap-2 text-sm"><Icons.Plus size={18}/> Create Goal</button>
+          </div>
+          {saves.length>0?saves.map(s=>{const pct=(s.current/s.target)*100;return(
+            <div key={s.id} className="bg-gray-50 rounded-xl p-4 space-y-3">
+              <div className="flex items-start justify-between"><div><h4 className="font-semibold text-gray-800">{s.name}</h4><p className="text-sm text-gray-400">KES {s.current.toLocaleString()} of KES {s.target.toLocaleString()}</p></div><button onClick={()=>remSave(s.id)} className="text-red-400 hover:text-red-600 p-1.5 hover:bg-red-50 rounded-lg"><Icons.Trash2 size={16}/></button></div>
+              <div><div className="flex justify-between text-xs text-gray-400 mb-1"><span>Progress</span><span>{Math.round(pct)}%</span></div><div className="w-full bg-gray-200 rounded-full h-2.5"><div className="bg-green-500 h-2.5 rounded-full" style={{width:`${Math.min(pct,100)}%`}}></div></div></div>
+              <div className="flex gap-2"><input type="number" value={aa[s.id]||''} onChange={e=>setAA({...aa,[s.id]:e.target.value})} placeholder="Add amount…" className="flex-1 px-3 py-2 border border-gray-300 rounded-xl text-sm outline-none"/><button onClick={()=>{if(aa[s.id]){updSave(s.id,aa[s.id]);setAA({...aa,[s.id]:''});}}} className="bg-indigo-600 text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-indigo-700">Add</button></div>
+            </div>
+          );}):(<p className="text-gray-400 text-center py-10 text-sm">No savings goals yet</p>)}
+        </div>
+      );
+    }
+
+    // ── Loans Tab ─────────────────────────────────────────────────────────
+    function LoansTab({ loans,addLoan,remLoan }) {
+      const [name,setName]=useState(''); const [prin,setPrin]=useState(''); const [rate,setRate]=useState(''); const [pay,setPay]=useState('');
+      const sub=()=>{if(!name||!prin||!pay)return;addLoan(name,prin,rate||0,pay);setName('');setPrin('');setRate('');setPay('');};
+      return (
+        <div className="space-y-6">
+          <h2 className="text-2xl font-bold text-gray-800">Loan Tracking</h2>
+          <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 text-sm text-yellow-800">💡 Add spending with category "Loan Payment" and include the loan name in the description to auto-reduce the balance.</div>
+          <div className="bg-gray-50 rounded-xl p-4 space-y-3">
+            <div><label className="block text-sm font-medium text-gray-700 mb-1">Loan Name</label><input type="text" value={name} onChange={e=>setName(e.target.value)} placeholder="e.g., Car Loan" className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-400"/></div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className="block text-sm font-medium text-gray-700 mb-1">Principal (KES)</label><input type="number" value={prin} onChange={e=>setPrin(e.target.value)} placeholder="0" className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-400"/></div>
+              <div><label className="block text-sm font-medium text-gray-700 mb-1">Interest % (optional)</label><input type="number" value={rate} onChange={e=>setRate(e.target.value)} placeholder="0" step="0.1" className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-400"/></div>
+            </div>
+            <div><label className="block text-sm font-medium text-gray-700 mb-1">Monthly Payment (KES)</label><input type="number" value={pay} onChange={e=>setPay(e.target.value)} placeholder="0" className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-400"/></div>
+            <button onClick={sub} className="w-full bg-indigo-600 text-white py-3 rounded-xl font-medium hover:bg-indigo-700 flex items-center justify-center gap-2 text-sm"><Icons.Plus size={18}/> Add Loan</button>
+          </div>
+          {loans.length>0?loans.map(l=>{const pct=((l.principal-l.currentBalance)/l.principal)*100;const paid=l.principal-l.currentBalance;const mo=l.monthlyPayment>0?Math.ceil(l.currentBalance/l.monthlyPayment):0;return(
+            <div key={l.id} className="bg-gray-50 rounded-xl p-4 space-y-3">
+              <div className="flex items-start justify-between"><div><h4 className="font-semibold text-gray-800">{l.name}</h4><p className="text-xs text-gray-400">Started {new Date(l.startDate).toLocaleDateString()}{l.interestRate>0?` · ${l.interestRate}% p.a.`:''}</p></div><button onClick={()=>remLoan(l.id)} className="text-red-400 hover:text-red-600 p-1.5 hover:bg-red-50 rounded-lg"><Icons.Trash2 size={16}/></button></div>
+              <div className="grid grid-cols-3 gap-2 text-sm">
+                <div className="bg-white rounded-lg p-2 text-center"><p className="text-xs text-gray-400">Principal</p><p className="font-bold">KES {l.principal.toLocaleString()}</p></div>
+                <div className="bg-white rounded-lg p-2 text-center"><p className="text-xs text-gray-400">Paid</p><p className="font-bold text-green-600">KES {paid.toLocaleString()}</p></div>
+                <div className="bg-white rounded-lg p-2 text-center"><p className="text-xs text-gray-400">Remaining</p><p className="font-bold text-red-500">KES {l.currentBalance.toLocaleString()}</p></div>
+              </div>
+              <div><div className="flex justify-between text-xs text-gray-400 mb-1"><span>Progress</span><span>{Math.round(pct)}%</span></div><div className="w-full bg-gray-200 rounded-full h-2.5"><div className="bg-indigo-600 h-2.5 rounded-full" style={{width:`${pct}%`}}></div></div></div>
+              <div className="bg-white rounded-lg p-3 text-sm flex justify-between"><span className="text-gray-400">Monthly payment</span><span className="font-bold">KES {l.monthlyPayment.toLocaleString()}</span></div>
+              {mo>0&&<p className="text-xs text-gray-400 text-right">~{mo} months remaining</p>}
+              {l.currentBalance===0&&<div className="bg-green-50 border border-green-200 rounded-xl p-3 text-sm text-green-700 text-center font-medium">Loan fully paid off!</div>}
+            </div>
+          );}):(<p className="text-gray-400 text-center py-10 text-sm">No loans tracked yet</p>)}
+        </div>
+      );
+    }
+
+    // ── Future Plans Tab ──────────────────────────────────────────────────
+    function FuturePlansTab({ plans,addPlan,remPlan,salary,totalFixed }) {
+      const [name,setName]=useState(''); const [amt,setAmt]=useState(''); const [mo,setMo]=useState('6');
+      const surplus=salary-totalFixed;
+      const sub=()=>{if(!name||!amt||!mo)return;addPlan(name,amt,mo);setName('');setAmt('');setMo('6');};
+      return (
+        <div className="space-y-6">
+          <h2 className="text-2xl font-bold text-gray-800">Future Planning</h2>
+          <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4"><p className="text-sm text-blue-600 font-medium">Monthly Surplus (after fixed costs)</p><p className="text-3xl font-bold text-blue-900">KES {surplus.toLocaleString()}</p></div>
+          <div className="bg-gray-50 rounded-xl p-4 space-y-3">
+            <div><label className="block text-sm font-medium text-gray-700 mb-1">What are you saving for?</label><input type="text" value={name} onChange={e=>setName(e.target.value)} placeholder="e.g., New Phone, Holiday" className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-purple-400"/></div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className="block text-sm font-medium text-gray-700 mb-1">Amount Needed (KES)</label><input type="number" value={amt} onChange={e=>setAmt(e.target.value)} placeholder="0" className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-purple-400"/></div>
+              <div><label className="block text-sm font-medium text-gray-700 mb-1">Months from Now</label><input type="number" value={mo} onChange={e=>setMo(e.target.value)} min="1" max="12" className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-purple-400"/></div>
+            </div>
+            <button onClick={sub} className="w-full bg-purple-600 text-white py-3 rounded-xl font-medium hover:bg-purple-700 flex items-center justify-center gap-2 text-sm"><Icons.Plus size={18}/> Add Plan</button>
+          </div>
+          {plans.length>0?plans.sort((a,b)=>a.monthsAhead-b.monthsAhead).map(p=>{const mpm=p.amount/p.monthsAhead;const td=new Date();td.setMonth(td.getMonth()+p.monthsAhead);return(
+            <div key={p.id} className="bg-gray-50 rounded-xl p-4">
+              <div className="flex items-start justify-between mb-3"><div><h4 className="font-semibold text-gray-800">{p.name}</h4><p className="text-xs text-gray-400">Target: {td.toLocaleDateString('en-US',{month:'long',year:'numeric'})}</p></div><button onClick={()=>remPlan(p.id)} className="text-red-400 hover:text-red-600 p-1.5 hover:bg-red-50 rounded-lg"><Icons.Trash2 size={16}/></button></div>
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div className="bg-white rounded-lg p-3"><p className="text-xs text-gray-400 mb-1">Total Needed</p><p className="font-bold text-lg">KES {p.amount.toLocaleString()}</p></div>
+                <div className="bg-white rounded-lg p-3"><p className="text-xs text-gray-400 mb-1">Save Per Month</p><p className="font-bold text-lg">KES {Math.round(mpm).toLocaleString()}</p></div>
+              </div>
+              {mpm>surplus&&<div className="mt-3 bg-yellow-50 border border-yellow-200 rounded-xl p-3 text-xs text-yellow-800">⚠️ Requires more than your monthly surplus. Consider extending the timeline.</div>}
+            </div>
+          );}):(<p className="text-gray-400 text-center py-10 text-sm">No plans yet</p>)}
+        </div>
+      );
+    }
+
+    // ── Setup Tab ─────────────────────────────────────────────────────────
+    function SetupTab({ salary,updSalary,fixed,addFixed,remFixed,balance,updBalance }) {
+      const [ns,setNs]=useState(salary); const [cn,setCn]=useState(''); const [ca,setCa]=useState(''); const [nb,setNb]=useState(balance);
+      const total=fixed.reduce((s,c)=>s+c.amount,0);
+      return (
+        <div className="space-y-6">
+          <h2 className="text-2xl font-bold text-gray-800">Setup</h2>
+          <div className="bg-gray-50 rounded-xl p-4 space-y-3">
+            <h3 className="font-semibold text-gray-700">Opening Balance</h3>
+            <div><label className="block text-sm font-medium text-gray-700 mb-1">This month's opening balance (KES)</label><input type="number" value={nb} onChange={e=>setNb(e.target.value)} placeholder="0" className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-purple-400"/></div>
+            <button onClick={()=>updBalance(parseFloat(nb)||0)} className="w-full bg-purple-600 text-white py-2.5 rounded-xl font-medium hover:bg-purple-700 text-sm">Update Opening Balance</button>
+            {balance>0&&<p className="text-sm text-purple-700 bg-purple-50 border border-purple-200 rounded-xl p-3">Current: <span className="font-bold">KES {balance.toLocaleString()}</span></p>}
+          </div>
+          <div className="bg-gray-50 rounded-xl p-4 space-y-3">
+            <h3 className="font-semibold text-gray-700">Monthly Salary</h3>
+            <div><label className="block text-sm font-medium text-gray-700 mb-1">Monthly salary (KES)</label><input type="number" value={ns} onChange={e=>setNs(e.target.value)} placeholder="0" className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-400"/></div>
+            <button onClick={()=>updSalary(parseFloat(ns)||0)} className="w-full bg-indigo-600 text-white py-2.5 rounded-xl font-medium hover:bg-indigo-700 text-sm">Update Salary</button>
+            {salary>0&&<p className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-xl p-3">Current: <span className="font-bold">KES {salary.toLocaleString()}</span></p>}
+          </div>
+          <div className="bg-gray-50 rounded-xl p-4 space-y-3">
+            <h3 className="font-semibold text-gray-700">Fixed Monthly Costs</h3>
+            <div><label className="block text-sm font-medium text-gray-700 mb-1">Cost Name</label><input type="text" value={cn} onChange={e=>setCn(e.target.value)} placeholder="e.g., Rent, Internet" className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-400"/></div>
+            <div><label className="block text-sm font-medium text-gray-700 mb-1">Amount (KES)</label><input type="number" value={ca} onChange={e=>setCa(e.target.value)} placeholder="0" className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-400"/></div>
+            <button onClick={()=>{if(cn&&ca){addFixed(cn,ca);setCn('');setCa('');}}} className="w-full bg-indigo-600 text-white py-2.5 rounded-xl font-medium hover:bg-indigo-700 flex items-center justify-center gap-2 text-sm"><Icons.Plus size={18}/> Add Fixed Cost</button>
+            {fixed.length>0&&(
+              <div className="space-y-2 pt-2">
+                <div className="flex justify-between text-sm font-semibold text-gray-700 pb-2 border-b border-gray-200"><span>Total Fixed Costs</span><span>KES {total.toLocaleString()}</span></div>
+                {fixed.map(c=>(
+                  <div key={c.id} className="bg-white rounded-xl p-3 flex items-center justify-between">
+                    <div><p className="font-medium text-gray-800 text-sm">{c.name}</p><p className="text-xs text-gray-400">KES {c.amount.toLocaleString()}</p></div>
+                    <button onClick={()=>remFixed(c.id)} className="text-red-400 hover:text-red-600 p-1.5 hover:bg-red-50 rounded-lg"><Icons.Trash2 size={16}/></button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    // ── Users Tab (admin only) ────────────────────────────────────────────
+    function UsersTab() {
+      const [users, setUsers] = useState([]);
+      const [newUn, setNewUn] = useState(''); const [newPw, setNewPw] = useState('');
+      const [err, setErr] = useState(''); const [ok, setOk] = useState('');
+      const [busy, setBusy] = useState(false);
+
+      const load = async () => {
+        try { setUsers(await api('GET', '/api/admin/users')); } catch(e) { setErr(e.message); }
+      };
+      useEffect(() => { load(); }, []);
+
+      const create = async () => {
+        setErr(''); setOk('');
+        if (!newUn || !newPw) { setErr('Enter both username and password'); return; }
+        setBusy(true);
+        try {
+          await api('POST', '/api/admin/users', { username: newUn, password: newPw });
+          setOk(`Account created for "${newUn}"`);
+          setNewUn(''); setNewPw('');
+          load();
+        } catch(e) { setErr(e.message); }
+        setBusy(false);
+      };
+
+      const remove = async (username) => {
+        if (!confirm(`Delete "${username}"? Their budget data will also be removed.`)) return;
+        try {
+          await api('DELETE', `/api/admin/users/${username}`);
+          setOk(`"${username}" deleted`);
+          load();
+        } catch(e) { setErr(e.message); }
+      };
+
+      const resetPw = async (username) => {
+        const pw = prompt(`New password for "${username}" (min 4 characters):`);
+        if (!pw) return;
+        try {
+          await api('PUT', `/api/admin/users/${username}/password`, { password: pw });
+          setOk(`Password reset for "${username}"`);
+        } catch(e) { setErr(e.message); }
+      };
+
+      return (
+        <div className="space-y-6">
+          <h2 className="text-2xl font-bold text-gray-800">User Management</h2>
+          <div className="bg-indigo-50 border-2 border-indigo-200 rounded-xl p-4 text-sm text-indigo-800">
+            Create accounts for your friends. Each person's budget data is stored separately on the server — they can log in from any device.
+          </div>
+
+          <div className="bg-gray-50 rounded-xl p-4 space-y-3">
+            <h3 className="font-semibold text-gray-700">Create New Account</h3>
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className="block text-sm font-medium text-gray-700 mb-1">Username</label><input type="text" value={newUn} onChange={e=>setNewUn(e.target.value)} onKeyDown={e=>e.key==='Enter'&&create()} className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-400" placeholder="e.g., alice" disabled={busy}/></div>
+              <div><label className="block text-sm font-medium text-gray-700 mb-1">Password</label><input type="text" value={newPw} onChange={e=>setNewPw(e.target.value)} onKeyDown={e=>e.key==='Enter'&&create()} className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-400" placeholder="Temporary password" disabled={busy}/></div>
+            </div>
+            {err && <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-sm text-red-700">{err}</div>}
+            {ok  && <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-sm text-green-700">{ok}</div>}
+            <button onClick={create} disabled={busy} className="w-full bg-indigo-600 text-white py-2.5 rounded-xl font-medium hover:bg-indigo-700 flex items-center justify-center gap-2 text-sm disabled:opacity-50">
+              <Icons.Plus size={18}/> {busy ? 'Creating…' : 'Create Account'}
+            </button>
+          </div>
+
+          <div>
+            <h3 className="font-semibold text-gray-700 mb-3 text-sm">All Users ({users.length})</h3>
+            {users.map(u => (
+              <div key={u.username} className="bg-gray-50 rounded-xl p-4 flex items-center justify-between mb-2">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 font-bold text-sm">
+                    {u.username[0].toUpperCase()}
+                  </div>
+                  <div>
+                    <p className="font-medium text-gray-800 text-sm">{u.username}</p>
+                    {u.is_admin === 1 && <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full">Admin</span>}
+                  </div>
+                </div>
+                {u.is_admin !== 1 && (
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => resetPw(u.username)} className="px-3 py-1.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg text-xs font-medium hover:bg-amber-100">Reset Password</button>
+                    <button onClick={() => remove(u.username)} className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg"><Icons.Trash2 size={16}/></button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // ── Mount ─────────────────────────────────────────────────────────────
+    ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+  </script>
+</body>
+</html>
