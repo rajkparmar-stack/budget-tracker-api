@@ -25,6 +25,8 @@ db.exec(`
     username     TEXT PRIMARY KEY COLLATE NOCASE,
     password_hash TEXT NOT NULL,
     is_admin     INTEGER NOT NULL DEFAULT 0,
+    is_active    INTEGER NOT NULL DEFAULT 1,
+    active_until INTEGER DEFAULT NULL,
     created_at   INTEGER NOT NULL DEFAULT (unixepoch())
   );
 
@@ -39,6 +41,10 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_data_user ON budget_data(username);
 `);
+
+// Migrate existing deployments that don't have the new columns yet
+try { db.exec(`ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1`); } catch {}
+try { db.exec(`ALTER TABLE users ADD COLUMN active_until INTEGER DEFAULT NULL`); } catch {}
 
 // ── Middleware ─────────────────────────────────────────────────────────────
 app.use(cors({ origin: FRONTEND_URL, credentials: true }));
@@ -104,6 +110,16 @@ app.post('/api/login', async (req, res) => {
     if (!user || !valid)
       return res.status(401).json({ error: 'Invalid username or password' });
 
+    // Check deactivated (admin is exempt)
+    if (user.is_admin !== 1 && user.is_active === 0)
+      return res.status(403).json({ error: 'Your account has been deactivated. Contact the admin.' });
+
+    // Check expiry (admin is exempt; NULL active_until = indefinite)
+    if (user.is_admin !== 1 && user.active_until !== null) {
+      if (Math.floor(Date.now() / 1000) > user.active_until)
+        return res.status(403).json({ error: 'Your account access has expired. Contact the admin to renew.' });
+    }
+
     const token = jwt.sign(
       { username: user.username, isAdmin: user.is_admin === 1 },
       JWT_SECRET,
@@ -157,7 +173,7 @@ app.delete('/api/data/:key', auth, (req, res) => {
 // ── Admin: User Management ─────────────────────────────────────────────────
 app.get('/api/admin/users', adminOnly, (_req, res) => {
   const users = db.prepare(
-    'SELECT username, is_admin, created_at FROM users ORDER BY created_at'
+    'SELECT username, is_admin, is_active, active_until, created_at FROM users ORDER BY created_at'
   ).all();
   res.json(users);
 });
@@ -191,7 +207,6 @@ app.delete('/api/admin/users/:username', adminOnly, (req, res) => {
   const target = req.params.username.toLowerCase();
   if (target === ADMIN)
     return res.status(403).json({ error: 'Cannot delete the admin account' });
-  // budget_data is cascade-deleted via the FK constraint
   db.prepare('DELETE FROM users WHERE username = ?').run(target);
   res.json({ success: true });
 });
@@ -209,6 +224,37 @@ app.put('/api/admin/users/:username/password', adminOnly, async (req, res) => {
     console.error(e);
     res.status(500).json({ error: 'Server error' });
   }
+});
+
+// Toggle active / inactive — preserves all user data
+app.put('/api/admin/users/:username/active', adminOnly, (req, res) => {
+  const target = req.params.username.toLowerCase();
+  if (target === ADMIN)
+    return res.status(403).json({ error: 'Cannot deactivate the admin account' });
+  const { is_active } = req.body;
+  if (typeof is_active !== 'number' || ![0, 1].includes(is_active))
+    return res.status(400).json({ error: 'is_active must be 0 or 1' });
+  db.prepare('UPDATE users SET is_active = ? WHERE username = ?').run(is_active, target);
+  res.json({ success: true });
+});
+
+// Set or clear the account expiry date
+// active_until: ISO date string like "2026-06-30", or null to make indefinite
+app.put('/api/admin/users/:username/expiry', adminOnly, (req, res) => {
+  const target = req.params.username.toLowerCase();
+  if (target === ADMIN)
+    return res.status(403).json({ error: 'Cannot set expiry on the admin account' });
+  const { active_until } = req.body; // ISO string or null
+  let ts = null;
+  if (active_until) {
+    const d = new Date(active_until);
+    if (isNaN(d.getTime())) return res.status(400).json({ error: 'Invalid date' });
+    // Expire at end of that day (23:59:59)
+    d.setHours(23, 59, 59, 999);
+    ts = Math.floor(d.getTime() / 1000);
+  }
+  db.prepare('UPDATE users SET active_until = ? WHERE username = ?').run(ts, target);
+  res.json({ success: true });
 });
 
 // ── Start ──────────────────────────────────────────────────────────────────
